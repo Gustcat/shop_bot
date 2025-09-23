@@ -111,22 +111,36 @@ class Order(Base):
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     phone: Mapped[str] = mapped_column(String(20), nullable=False)
-    address: Mapped[str] = mapped_column(String(500), nullable=False)
+    address: Mapped[str] = mapped_column(String(500), nullable=True)
     delivery_type: Mapped[DeliveryType] = mapped_column(
         String(50), default=DeliveryType.PICKUP, nullable=False
     )
     status: Mapped[OrderStatus] = mapped_column(
         String(50), default=OrderStatus.NEW, nullable=False
     )
-
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    pickup_point_id: Mapped[int | None] = mapped_column(
+        ForeignKey(
+            "pickup_points.id", name="fk_orders_pickup_point_id", ondelete="SET NULL"
+        ),
+        nullable=True,
+    )
 
+    pickup_point: Mapped[Optional["PickupPoint"]] = relationship()
     user: Mapped["User"] = relationship(back_populates="orders")
     items: Mapped[list["OrderItem"]] = relationship(
         back_populates="order", cascade="all, delete-orphan"
     )
+
+
+class PickupPoint(Base):
+    __tablename__ = "pickup_points"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    address: Mapped[str] = mapped_column(String(500), nullable=False)
 
 
 class OrderItem(Base):

@@ -2,6 +2,7 @@ from aiogram.filters.callback_data import CallbackData
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from typing import Sequence
 from db import Category, Product
+from keyboards.cart_kb import CartCD
 
 
 class CategoryCD(CallbackData, prefix="category"):
@@ -11,12 +12,6 @@ class CategoryCD(CallbackData, prefix="category"):
 class ProductCD(CallbackData, prefix="product"):
     id: int
     category_id: int
-
-
-class CartCD(CallbackData, prefix="cart"):
-    action: str
-    product_id: int | None = None
-    category_id: int | None = None
 
 
 def categories_kb(categories: Sequence[Category]) -> InlineKeyboardMarkup:

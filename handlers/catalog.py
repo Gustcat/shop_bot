@@ -106,7 +106,7 @@ async def show_product(call: CallbackQuery, callback_data: ProductCD):
         text = (
             f"<b>{product.name}</b>\n\n"
             f"{product.description or 'Без описания'}\n\n"
-            f"Цена: {format_price_text(product.price)} ₽"
+            f"Цена: {format_price_text(product.price)}"
         )
 
         if product.photo_filename:
