@@ -12,9 +12,10 @@ class CategoryCD(CallbackData, prefix="category"):
 class ProductCD(CallbackData, prefix="product"):
     id: int
     category_id: int
+    action: str
 
 
-def categories_kb(categories: Sequence[Category]) -> InlineKeyboardMarkup:
+def categories_kb(categories: list[Category]) -> InlineKeyboardMarkup:
     """Клавиатура со списком категорий"""
     rows = [
         [
@@ -30,7 +31,7 @@ def categories_kb(categories: Sequence[Category]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def products_kb(products: Sequence[Product], category_id: int) -> InlineKeyboardMarkup:
+def products_kb(products: list[Product], category_id: int) -> InlineKeyboardMarkup:
     """Клавиатура со списком товаров в категории"""
     keyboard_rows = []
 
@@ -39,7 +40,9 @@ def products_kb(products: Sequence[Product], category_id: int) -> InlineKeyboard
             [
                 InlineKeyboardButton(
                     text=prod.name,
-                    callback_data=ProductCD(id=prod.id, category_id=category_id).pack(),
+                    callback_data=ProductCD(
+                        action="view", id=prod.id, category_id=category_id
+                    ).pack(),
                 )
             ]
         )
@@ -54,22 +57,49 @@ def products_kb(products: Sequence[Product], category_id: int) -> InlineKeyboard
     return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
 
 
-def product_detail_kb(product_id, category_id: int) -> InlineKeyboardMarkup:
+def product_detail_kb(
+    product_id, category_id: int, is_admin: bool = False
+) -> InlineKeyboardMarkup:
     """Клавиатура для отдельного продукта"""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
+    buttons: list[list[InlineKeyboardButton]] = []
+
+    if is_admin:
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text="✏️ Редактировать",
+                    callback_data=ProductCD(
+                        action="edit", id=product_id, category_id=category_id
+                    ).pack(),
+                )
+            ]
+        )
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text="🗑 Удалить",
+                    callback_data=ProductCD(
+                        action="delete", id=product_id, category_id=category_id
+                    ).pack(),
+                )
+            ]
+        )
+    else:
+        buttons.append(
             [
                 InlineKeyboardButton(
                     text="🛒 В корзину",
                     callback_data=CartCD(action="add", product_id=product_id).pack(),
                 )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="⬅️ Назад к категории",
-                    callback_data=CategoryCD(id=category_id).pack(),
-                ),
-                InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu"),
-            ],
+            ]
+        )
+
+    buttons.append(
+        [
+            InlineKeyboardButton(
+                text="⬅️ Назад", callback_data=CategoryCD(id=category_id).pack()
+            )
         ]
     )
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)

@@ -6,6 +6,7 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from db import (
     DeliveryType,
@@ -16,8 +17,16 @@ from db import (
     OrderItem,
     PickupPoint,
 )
-from keyboards.order_kb import confirm_order_kb, delivery_kb, PickupCD, pickup_points_kb
+from keyboards.order_kb import (
+    confirm_order_kb,
+    delivery_kb,
+    PickupCD,
+    pickup_points_kb,
+    user_orders_kb,
+    OrderCD,
+)
 from repository.user import get_or_create_user
+from utils.common_messages import create_order_details_message
 from utils.formatting import format_price_text
 
 router = Router()
@@ -240,3 +249,39 @@ async def cancel_order(call: CallbackQuery, state: FSMContext):
     await state.clear()
     await call.message.answer("Заказ отменён.")
     await call.answer()
+
+
+@router.callback_query(F.data == "my_orders")
+async def show_my_orders(call: CallbackQuery):
+    async with async_session() as session:
+        user = await get_or_create_user(session, call.from_user)
+        user_id = user.id
+        q = select(Order).where(Order.user_id == user_id).order_by(Order.id.desc())
+        res = await session.execute(q)
+        orders = res.scalars().all()
+
+        if not orders:
+            await call.message.answer("У вас пока нет заказов 📭")
+            return
+
+        await call.message.answer("Ваши заказы:", reply_markup=user_orders_kb(orders))
+
+
+@router.callback_query(OrderCD.filter())
+async def show_detail_order(call: CallbackQuery, callback_data: OrderCD):
+    order_id = callback_data.id
+
+    async with async_session() as session:
+        user = await get_or_create_user(session, call.from_user)
+        user_id = user.id
+
+        result = await session.execute(
+            select(Order)
+            .options(
+                selectinload(Order.items).selectinload(OrderItem.product),
+                selectinload(Order.pickup_point),
+            )
+            .where(Order.id == order_id, Order.user_id == user_id)
+        )
+        order = result.scalar_one_or_none()
+    await create_order_details_message(call, order)

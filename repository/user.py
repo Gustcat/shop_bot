@@ -1,7 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db import User
+from db import User, UserRole
 
 
 async def get_or_create_user(session: AsyncSession, tg_user):

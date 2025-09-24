@@ -23,7 +23,7 @@ router = Router()
 
 
 @router.callback_query(F.data == "catalog")
-async def cb_show_categories(call: CallbackQuery):
+async def show_categories(call: CallbackQuery):
     """
     Выводит список категорий.
     """
@@ -35,10 +35,16 @@ async def cb_show_categories(call: CallbackQuery):
         await call.answer("Категории пока не добавлены.")
         return
 
-    await call.message.edit_text(
-        "Выберите категорию:",
-        reply_markup=categories_kb(categories),
-    )
+    if call.message.photo:
+        await call.message.delete()
+        await call.message.answer(
+            "Выберите категорию:", reply_markup=categories_kb(categories)
+        )
+    else:
+        await call.message.edit_text(
+            "Выберите категорию:", reply_markup=categories_kb(categories)
+        )
+
     await call.answer()
 
 
@@ -88,8 +94,8 @@ async def show_products(call: CallbackQuery, callback_data: CategoryCD):
             )
 
 
-@router.callback_query(ProductCD.filter())
-async def show_product(call: CallbackQuery, callback_data: ProductCD):
+@router.callback_query(ProductCD.filter(F.action == "view"))
+async def show_detail_product(call: CallbackQuery, callback_data: ProductCD, is_admin):
     """
     Выводит карточку конкретного товара.
     """
@@ -117,12 +123,16 @@ async def show_product(call: CallbackQuery, callback_data: ProductCD):
             await call.message.answer_photo(
                 photo=photo_file,
                 caption=text,
-                reply_markup=product_detail_kb(product.id, category_id),
+                reply_markup=product_detail_kb(
+                    product.id, category_id, is_admin=is_admin
+                ),
                 parse_mode="HTML",
             )
         else:
             await call.message.edit_text(
                 text,
-                reply_markup=product_detail_kb(product.id, category_id),
+                reply_markup=product_detail_kb(
+                    product.id, category_id, is_admin=is_admin
+                ),
                 parse_mode="HTML",
             )
