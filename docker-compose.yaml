@@ -1,14 +1,22 @@
 version: '3'
 
 volumes:
-  bot_pg_volume:
+  pg_volume:
 
 services:
-  bot_pg:
+  pg:
     image: postgres:15-alpine3.17
     env_file:
       - .env
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - bot_pg_volume:/var/lib/postgresql/data
+      - pg_volume:/var/lib/postgresql/data
+
+  bot:
+    build: .
+    env_file: .env
+    ports:
+      - "${HTTP_PORT:-8000}:8000"
+    depends_on:
+      - pg
