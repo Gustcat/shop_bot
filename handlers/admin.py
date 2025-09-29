@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from config import MEDIA_ROOT
-from db import async_session, Order, Product, Category, OrderItem
+from db import async_session, Order, Product, Category, OrderItem, UserRole, User
 from keyboards.admin_kb import (
     AdminCD,
     admin_change_status_kb,
@@ -17,6 +17,7 @@ from keyboards.admin_kb import (
 from keyboards.catalog_kb import ProductCD
 from keyboards.main_menu_kb import main_menu_kb
 from utils.common_messages import create_order_details_message
+from utils.messaging import safe_delete_message
 
 router = Router()
 
@@ -42,16 +43,20 @@ async def file_remove(filename):
 
 
 @router.callback_query(F.data == "admin_create_product")
-async def start_create_product(call: CallbackQuery, state: FSMContext, is_admin):
-    if not is_admin:
+async def start_create_product(
+    call: CallbackQuery, state: FSMContext, user: User | None
+):
+    if user and user.role != UserRole.ADMIN:
         return await call.answer("Нет доступа ❌", show_alert=True)
     await call.message.answer("✏️ Введите название товара:")
     await state.set_state(ProductFSM.name)
 
 
 @router.callback_query(ProductCD.filter(F.action == "delete"))
-async def delete_product(call: CallbackQuery, callback_data: ProductCD, is_admin):
-    if not is_admin:
+async def delete_product(
+    call: CallbackQuery, callback_data: ProductCD, user: User | None
+):
+    if user and user.role != UserRole.ADMIN:
         return await call.answer("Нет доступа ❌", show_alert=True)
     product_id = callback_data.id
     async with async_session() as session:
@@ -64,15 +69,18 @@ async def delete_product(call: CallbackQuery, callback_data: ProductCD, is_admin
         await file_remove(file)
 
     await call.answer("✅ Товар успешно удалён", show_alert=True)
-    await call.message.delete()
+    await safe_delete_message(call.message)
     await call.message.answer("📋 Меню:", reply_markup=main_menu_kb(True))
 
 
 @router.callback_query(ProductCD.filter(F.action == "edit"))
 async def start_edit_product(
-    call: CallbackQuery, callback_data: ProductCD, state: FSMContext, is_admin
+    call: CallbackQuery,
+    callback_data: ProductCD,
+    state: FSMContext,
+    user: User | None,
 ):
-    if not is_admin:
+    if user and user.role != UserRole.ADMIN:
         return await call.answer("Нет доступа ❌", show_alert=True)
     product_id = callback_data.id
 
@@ -136,7 +144,6 @@ async def process_price(message: Message, state: FSMContext):
 
 @router.message(ProductFSM.photo, F.text)
 async def process_photo(message: Message, state: FSMContext):
-    print(f"<process_photo> enter for {message.text}")
     if message.text == "-":
         pass
     else:
@@ -147,7 +154,6 @@ async def process_photo(message: Message, state: FSMContext):
 
 @router.message(ProductFSM.photo, F.photo)
 async def process_photo(message: Message, state: FSMContext, bot: Bot):
-    print(f"<process_photo> enter for {message.text}")
     if message.photo:
         photo = message.photo[-1]
         file_info = await bot.get_file(photo.file_id)
@@ -313,8 +319,8 @@ async def cancel_product(call: CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(F.data == "admin_orders")
-async def show_orders(call: CallbackQuery, is_admin):
-    if not is_admin:
+async def show_orders(call: CallbackQuery, user: User | None):
+    if user and user.role != UserRole.ADMIN:
         return await call.answer("Нет доступа ❌", show_alert=True)
     async with async_session() as session:
         res = await session.execute(select(Order).order_by(Order.created_at))
@@ -328,8 +334,10 @@ async def show_orders(call: CallbackQuery, is_admin):
 
 
 @router.callback_query(AdminCD.filter())
-async def admin_change_status(call: CallbackQuery, callback_data: AdminCD, is_admin):
-    if not is_admin:
+async def admin_change_status(
+    call: CallbackQuery, callback_data: AdminCD, user: User | None
+):
+    if user and user.role != UserRole.ADMIN:
         return await call.answer("Нет доступа ❌", show_alert=True)
 
     async with async_session() as session:
@@ -353,5 +361,5 @@ async def admin_change_status(call: CallbackQuery, callback_data: AdminCD, is_ad
             order.status = callback_data.order_status
             await session.commit()
             await call.answer(f"Статус изменён на {order.status} ✅", show_alert=True)
-            await call.message.delete()
-            await create_order_details_message(call, order, main_menu_kb(is_admin))
+            await safe_delete_message(call.message)
+            await create_order_details_message(call, order, main_menu_kb(user.role))

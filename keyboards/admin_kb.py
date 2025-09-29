@@ -2,6 +2,7 @@ from aiogram.filters.callback_data import CallbackData
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from db import OrderStatus, Order
+from keyboards.common import MAIN_MENU_BUTTON
 
 
 class AdminCD(CallbackData, prefix="admin"):
@@ -36,7 +37,7 @@ def orders_kb(orders: list[Order]) -> InlineKeyboardMarkup:
         for order in orders
     ]
 
-    rows.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu")])
+    rows.append([MAIN_MENU_BUTTON])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

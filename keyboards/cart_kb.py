@@ -2,9 +2,11 @@ from aiogram.filters.callback_data import CallbackData
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from db import CartItem
+from keyboards.common import MAIN_MENU_BUTTON
+from utils.constants.callbacks import CART_CD
 
 
-class CartCD(CallbackData, prefix="cart"):
+class CartCD(CallbackData, prefix=CART_CD):
     action: str
     product_id: int | None = None
     category_id: int | None = None
@@ -48,6 +50,6 @@ def cart_kb(cart_items: list[CartItem]) -> InlineKeyboardMarkup:
     kb.append(
         [InlineKeyboardButton(text="✅ Оформить заказ", callback_data="checkout")]
     )
-    kb.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu")])
+    kb.append([MAIN_MENU_BUTTON])
 
     return InlineKeyboardMarkup(inline_keyboard=kb)

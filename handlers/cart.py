@@ -3,21 +3,28 @@ from aiogram.types import CallbackQuery
 from sqlalchemy import delete, select
 from sqlalchemy.orm import joinedload
 
-from db import async_session, CartItem, Product
+from handlers.catalog import show_detail_product
+from handlers.main_menu import back_to_main_callback
+from keyboards.catalog_kb import ProductCD
+from utils.constants.buttons import CART
+from db import async_session, CartItem, Product, User
 from keyboards.cart_kb import CartCD, cart_kb
-from keyboards.main_menu_kb import main_menu_kb
-from repository.user import get_or_create_user
+from repository.user import create_user
+from utils.constants.callbacks import CART_CD
 from utils.formatting import format_price_text
+from utils.messaging import update_or_replace_message
 
 router = Router()
 
 
 @router.callback_query(CartCD.filter(F.action == "add"))
-async def add_to_cart(call: CallbackQuery, callback_data: CartCD):
+async def add_to_cart(call: CallbackQuery, callback_data: CartCD, user: User | None):
     product_id = callback_data.product_id
+    category_id = callback_data.category_id
 
     async with async_session() as session:
-        user = await get_or_create_user(session, call.from_user)
+        if not user:
+            user = await create_user(session, call.from_user)
         user_id = user.id
 
         cart_item = (
@@ -30,21 +37,20 @@ async def add_to_cart(call: CallbackQuery, callback_data: CartCD):
 
         if cart_item:
             cart_item.quantity += 1
-            message_text = f"Количество товара увеличено на 1 ✅ \n (Всего в корзине {cart_item.quantity} шт.)"
         else:
             cart_item = CartItem(user_id=user_id, product_id=product_id, quantity=1)
             session.add(cart_item)
-            message_text = "Товар добавлен в корзину 🛒"
 
         await session.commit()
+    product_cd = ProductCD(action="view", id=product_id, category_id=category_id)
+    await show_detail_product(call, product_cd, user)
 
-    await call.answer(message_text, show_alert=True)
 
-
-@router.callback_query(F.data == "cart")
-async def show_cart(call: CallbackQuery):
+@router.callback_query(F.data == CART_CD)
+async def show_cart(call: CallbackQuery, user: User | None):
     async with async_session() as session:
-        user = await get_or_create_user(session, call.from_user)
+        if not user:
+            user = await create_user(session, call.from_user)
         user_id = user.id
         result = await session.execute(
             select(CartItem)
@@ -54,13 +60,11 @@ async def show_cart(call: CallbackQuery):
         cart_items = result.scalars().all()
 
         if not cart_items:
-            await call.message.edit_text(
-                "🛒 Ваша корзина пуста.", reply_markup=main_menu_kb
-            )
-            await call.answer()
+            await call.answer(f"{CART} пуста.", show_alert=False)
+            await back_to_main_callback(call, user)
             return
 
-        text_lines = ["🛒 Ваша корзина:"]
+        text_lines = [CART]
         total = 0
 
         for item in cart_items:
@@ -75,16 +79,21 @@ async def show_cart(call: CallbackQuery):
 
         text_lines.append(f"\n💰 Итого: {format_price_text(total)}")
 
-    await call.message.edit_text(
-        "\n".join(text_lines), reply_markup=cart_kb(cart_items)
+    await update_or_replace_message(
+        message=call.message,
+        text="\n".join(text_lines),
+        reply_markup=cart_kb(cart_items),
     )
     await call.answer()
 
 
 @router.callback_query(CartCD.filter(F.action == "increase"))
-async def increase_quantity(call: CallbackQuery, callback_data: CartCD):
+async def increase_quantity(
+    call: CallbackQuery, callback_data: CartCD, user: User | None
+):
     async with async_session() as session:
-        user = await get_or_create_user(session, call.from_user)
+        if not user:
+            user = await create_user(session, call.from_user)
         user_id = user.id
         item = (
             await session.execute(
@@ -99,13 +108,16 @@ async def increase_quantity(call: CallbackQuery, callback_data: CartCD):
             item.quantity += 1
             await session.commit()
 
-    await show_cart(call)
+    await show_cart(call, user)
 
 
 @router.callback_query(CartCD.filter(F.action == "decrease"))
-async def decrease_quantity(call: CallbackQuery, callback_data: CartCD):
+async def decrease_quantity(
+    call: CallbackQuery, callback_data: CartCD, user: User | None
+):
     async with async_session() as session:
-        user = await get_or_create_user(session, call.from_user)
+        if not user:
+            user = await create_user(session, call.from_user)
         user_id = user.id
         item = (
             await session.execute(
@@ -123,16 +135,17 @@ async def decrease_quantity(call: CallbackQuery, callback_data: CartCD):
                 await session.delete(item)
             await session.commit()
 
-    await show_cart(call)
+    await show_cart(call, user)
 
 
 @router.callback_query(CartCD.filter(F.action == "remove"))
-async def remove_item(call: CallbackQuery, callback_data: CartCD):
+async def remove_item(call: CallbackQuery, callback_data: CartCD, user: User | None):
     """
     Удаляет товар из корзины
     """
     async with async_session() as session:
-        user = await get_or_create_user(session, call.from_user)
+        if not user:
+            user = await create_user(session, call.from_user)
         user_id = user.id
         await session.execute(
             delete(CartItem).where(
@@ -142,7 +155,7 @@ async def remove_item(call: CallbackQuery, callback_data: CartCD):
         )
         await session.commit()
 
-    await show_cart(call)
+    await show_cart(call, user)
 
 
 @router.callback_query(F.data == "ignore")

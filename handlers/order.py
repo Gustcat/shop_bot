@@ -8,6 +8,8 @@ from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from keyboards.main_menu_kb import main_menu_kb
+from utils.constants.buttons import CART
 from db import (
     DeliveryType,
     async_session,
@@ -16,6 +18,7 @@ from db import (
     Order,
     OrderItem,
     PickupPoint,
+    User,
 )
 from keyboards.order_kb import (
     confirm_order_kb,
@@ -24,8 +27,9 @@ from keyboards.order_kb import (
     pickup_points_kb,
     user_orders_kb,
     OrderCD,
+    detail_order_kb,
 )
-from repository.user import get_or_create_user
+from repository.user import create_user
 from utils.common_messages import create_order_details_message
 from utils.formatting import format_price_text
 
@@ -36,21 +40,20 @@ class OrderFSM(StatesGroup):
     name = State()
     phone = State()
     address = State()
-    delivery = State()
+    delivery_type = State()
     pickup_point_id = State()
     confirm = State()
 
 
 @router.callback_query(F.data == "checkout")
-async def start_order(call: CallbackQuery, state: FSMContext):
+async def start_order(call: CallbackQuery, state: FSMContext, user: User | None):
     """
     Запуск оформления заказа из корзины.
     """
     async with async_session() as session:
-        user = await get_or_create_user(session, call.from_user)
+        if not user:
+            user = await create_user(session, call.from_user)
         user_id = user.id
-
-        print(user_id)
 
         result = await session.execute(
             select(CartItem).where(CartItem.user_id == user_id)
@@ -58,7 +61,7 @@ async def start_order(call: CallbackQuery, state: FSMContext):
         cart_items = result.scalars().all()
 
     if not cart_items:
-        await call.answer("Ваша корзина пуста.", show_alert=True)
+        await call.answer(f"{CART} пуста.", show_alert=True)
         return
 
     await call.message.answer("Введите ваше имя:")
@@ -84,19 +87,20 @@ async def process_phone(message: Message, state: FSMContext):
 
     await state.update_data(phone=phone)
     await message.answer("Выберите способ доставки:", reply_markup=delivery_kb)
-    await state.set_state(OrderFSM.delivery)
+    await state.set_state(OrderFSM.delivery_type)
 
 
-@router.callback_query(F.data == "delivery_courier", OrderFSM.delivery)
+@router.callback_query(F.data == "delivery_courier", OrderFSM.delivery_type)
 async def choose_courier(call: CallbackQuery, state: FSMContext):
-    await state.update_data(delivery=DeliveryType.COURIER)
+    await state.update_data(delivery_type=DeliveryType.COURIER)
     await call.message.answer("Введите адрес доставки:")
     await state.set_state(OrderFSM.address)
+    await call.answer()
 
 
-@router.callback_query(F.data == "delivery_pickup", OrderFSM.delivery)
+@router.callback_query(F.data == "delivery_pickup", OrderFSM.delivery_type)
 async def choose_pickup(call: CallbackQuery, state: FSMContext):
-    await state.update_data(delivery=DeliveryType.PICKUP)
+    await state.update_data(delivery_type=DeliveryType.PICKUP)
     async with async_session() as session:
         result = await session.execute(select(PickupPoint))
         points = result.scalars().all()
@@ -109,14 +113,16 @@ async def choose_pickup(call: CallbackQuery, state: FSMContext):
         "📍 Выберите пункт самовывоза:", reply_markup=pickup_points_kb(points)
     )
     await state.set_state(OrderFSM.pickup_point_id)
+    await call.answer()
 
 
 @router.message(OrderFSM.address)
-async def process_address(message: Message, state: FSMContext):
+async def process_address(message: Message, state: FSMContext, user: User | None):
     await state.update_data(address=message.text)
 
     async with async_session() as session:
-        user = await get_or_create_user(session, message.from_user)
+        if not user:
+            user = await create_user(session, message.from_user)
         user_id = user.id
         await send_order_summary(message, state, session, user_id)
 
@@ -125,16 +131,18 @@ async def process_address(message: Message, state: FSMContext):
 
 @router.callback_query(PickupCD.filter(), OrderFSM.pickup_point_id)
 async def pickup_selected(
-    call: CallbackQuery, state: FSMContext, callback_data: PickupCD
+    call: CallbackQuery, state: FSMContext, callback_data: PickupCD, user: User | None
 ):
     await state.update_data(pickup_point_id=callback_data.id)
 
     async with async_session() as session:
-        user = await get_or_create_user(session, call.from_user)
+        if not user:
+            user = await create_user(session, call.from_user)
         user_id = user.id
         await send_order_summary(call, state, session, user_id)
 
     await state.set_state(OrderFSM.confirm)
+    await call.answer()
 
 
 async def send_order_summary(
@@ -145,7 +153,6 @@ async def send_order_summary(
     Поддерживает курьера и самовывоз.
     """
     data = await state.get_data()
-    print(f"{data=}")
 
     result = await session.execute(select(CartItem).where(CartItem.user_id == user_id))
     cart_items = result.scalars().all()
@@ -164,9 +171,9 @@ async def send_order_summary(
         )
 
     delivery_text = ""
-    if data.get("delivery") == DeliveryType.COURIER:
+    if data.get("delivery_type") == DeliveryType.COURIER:
         delivery_text = f"🏠 Адрес: {data.get('address')}"
-    elif data.get("delivery") == DeliveryType.PICKUP:
+    elif data.get("delivery_type") == DeliveryType.PICKUP:
         pickup_point = await session.get(PickupPoint, data.get("pickup_point_id"))
         if pickup_point:
             delivery_text = f"🏬 Самовывоз: {pickup_point.name}, {pickup_point.address}"
@@ -188,11 +195,12 @@ async def send_order_summary(
 
 
 @router.callback_query(F.data == "order_confirm", OrderFSM.confirm)
-async def confirm_order(call: CallbackQuery, state: FSMContext):
+async def confirm_order(call: CallbackQuery, state: FSMContext, user: User | None):
     data = await state.get_data()
 
     async with async_session() as session:
-        user = await get_or_create_user(session, call.from_user)
+        if not user:
+            user = await create_user(session, call.from_user)
         user_id = user.id
 
         result = await session.execute(
@@ -201,7 +209,7 @@ async def confirm_order(call: CallbackQuery, state: FSMContext):
         cart_items = result.scalars().all()
 
         if not cart_items:
-            await call.answer("Корзина пуста.", show_alert=True)
+            await call.answer(f"{CART} пуста.", show_alert=True)
             await state.clear()
             return
 
@@ -212,11 +220,13 @@ async def confirm_order(call: CallbackQuery, state: FSMContext):
             phone=data.get("phone"),
             delivery_type=data.get("delivery_type"),
         )
+        print(f"{data=}")
 
         if data.get("delivery_type") == DeliveryType.COURIER:
             order.address = data.get("address")
 
         elif data.get("delivery_type") == DeliveryType.PICKUP:
+            print(f"{data.get('pickup_point_id')=}")
             order.pickup_point_id = data.get("pickup_point_id")
 
         session.add(order)
@@ -239,7 +249,10 @@ async def confirm_order(call: CallbackQuery, state: FSMContext):
 
         await session.commit()
 
-    await call.message.answer(f"Спасибо за заказ! Номер заказа: {order.order_uuid}")
+    await call.message.answer(
+        f"Спасибо за заказ! Номер заказа: {order.order_uuid}",
+        reply_markup=main_menu_kb(user_role=user.role),
+    )
     await state.clear()
     await call.answer()
 
@@ -252,27 +265,34 @@ async def cancel_order(call: CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(F.data == "my_orders")
-async def show_my_orders(call: CallbackQuery):
+async def show_my_orders(call: CallbackQuery, user: User | None):
     async with async_session() as session:
-        user = await get_or_create_user(session, call.from_user)
+        if not user:
+            user = await create_user(session, call.from_user)
         user_id = user.id
         q = select(Order).where(Order.user_id == user_id).order_by(Order.id.desc())
         res = await session.execute(q)
         orders = res.scalars().all()
 
         if not orders:
-            await call.message.answer("У вас пока нет заказов 📭")
+            await call.answer("У вас пока нет заказов 📭", show_alert=False)
             return
 
-        await call.message.answer("Ваши заказы:", reply_markup=user_orders_kb(orders))
+        await call.message.edit_text(
+            "Ваши заказы:", reply_markup=user_orders_kb(orders)
+        )
+        await call.answer()
 
 
 @router.callback_query(OrderCD.filter())
-async def show_detail_order(call: CallbackQuery, callback_data: OrderCD):
+async def show_detail_order(
+    call: CallbackQuery, callback_data: OrderCD, user: User | None
+):
     order_id = callback_data.id
 
     async with async_session() as session:
-        user = await get_or_create_user(session, call.from_user)
+        if not user:
+            user = await create_user(session, call.from_user)
         user_id = user.id
 
         result = await session.execute(
@@ -284,4 +304,5 @@ async def show_detail_order(call: CallbackQuery, callback_data: OrderCD):
             .where(Order.id == order_id, Order.user_id == user_id)
         )
         order = result.scalar_one_or_none()
-    await create_order_details_message(call, order)
+    await create_order_details_message(call, order, detail_order_kb)
+    await call.answer()

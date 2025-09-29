@@ -1,8 +1,8 @@
 from aiogram.filters.callback_data import CallbackData
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from db import PickupPoint, Order
+from keyboards.common import MAIN_MENU_BUTTON
 
 
 class PickupCD(CallbackData, prefix="pickup"):
@@ -32,6 +32,15 @@ confirm_order_kb = InlineKeyboardMarkup(
     ]
 )
 
+detail_order_kb = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="my_orders"),
+            MAIN_MENU_BUTTON,
+        ]
+    ]
+)
+
 
 def pickup_points_kb(points: list[PickupPoint]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -48,14 +57,15 @@ def pickup_points_kb(points: list[PickupPoint]) -> InlineKeyboardMarkup:
 
 
 def user_orders_kb(orders: list[Order]) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text=f"Заказ {order.order_uuid} \n Статус: {order.status}",
-                    callback_data=OrderCD(id=order.id).pack(),
-                )
-            ]
-            for order in orders
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                text=f"Заказ {order.order_uuid}\nСтатус: {order.status}",
+                callback_data=OrderCD(id=order.id).pack(),
+            )
         ]
-    )
+        for order in orders
+    ]
+
+    keyboard.append([MAIN_MENU_BUTTON])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)

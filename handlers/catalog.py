@@ -1,13 +1,14 @@
 from pathlib import Path
 
 from aiogram import Router, F
+from aiogram.enums import ParseMode
 from aiogram.types import (
     CallbackQuery,
     FSInputFile,
 )
 from sqlalchemy import select
 
-from db import async_session
+from db import async_session, UserRole, CartItem, User
 from db import Category, Product
 from keyboards.catalog_kb import (
     categories_kb,
@@ -18,6 +19,7 @@ from keyboards.catalog_kb import (
 )
 from config import MEDIA_ROOT
 from utils.formatting import format_price_text
+from utils.messaging import safe_delete_message, update_or_replace_message
 
 router = Router()
 
@@ -36,7 +38,7 @@ async def show_categories(call: CallbackQuery):
         return
 
     if call.message.photo:
-        await call.message.delete()
+        await safe_delete_message(call.message)
         await call.message.answer(
             "Выберите категорию:", reply_markup=categories_kb(categories)
         )
@@ -81,21 +83,16 @@ async def show_products(call: CallbackQuery, callback_data: CategoryCD):
             else f"В категории «{category.name}» товаров пока нет."
         )
 
-        if call.message.photo:
-            await call.message.delete()
-            await call.message.answer(
-                text,
-                reply_markup=products_kb(products, category_id),
-            )
-        else:
-            await call.message.edit_text(
-                text,
-                reply_markup=products_kb(products, category_id),
-            )
+        await update_or_replace_message(
+            call.message, text, reply_markup=products_kb(products, category_id)
+        )
+        await call.answer()
 
 
 @router.callback_query(ProductCD.filter(F.action == "view"))
-async def show_detail_product(call: CallbackQuery, callback_data: ProductCD, is_admin):
+async def show_detail_product(
+    call: CallbackQuery, callback_data: ProductCD, user: User | None
+):
     """
     Выводит карточку конкретного товара.
     """
@@ -115,24 +112,35 @@ async def show_detail_product(call: CallbackQuery, callback_data: ProductCD, is_
             f"Цена: {format_price_text(product.price)}"
         )
 
+        quantity = 0
+        if user and user.role == UserRole.CUSTOMER:
+            result = await session.execute(
+                select(CartItem.quantity).where(
+                    CartItem.product_id == product_id, CartItem.user_id == user.id
+                )
+            )
+
+            quantity = result.scalar_one_or_none() or 0
+
         if product.photo_filename:
             photo_path = Path(MEDIA_ROOT) / product.photo_filename
             photo_file = FSInputFile(photo_path)
 
-            await call.message.delete()
+            await safe_delete_message(call.message)
             await call.message.answer_photo(
                 photo=photo_file,
                 caption=text,
                 reply_markup=product_detail_kb(
-                    product.id, category_id, is_admin=is_admin
+                    product.id, category_id, user.role, quantity
                 ),
-                parse_mode="HTML",
+                parse_mode=ParseMode.HTML,
             )
         else:
             await call.message.edit_text(
                 text,
                 reply_markup=product_detail_kb(
-                    product.id, category_id, is_admin=is_admin
+                    product.id, category_id, user.role, quantity
                 ),
-                parse_mode="HTML",
+                parse_mode=ParseMode.HTML,
             )
+        await call.answer()

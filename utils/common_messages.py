@@ -1,6 +1,6 @@
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup
 
-from db import Order
+from db import Order, DeliveryType
 from utils.formatting import format_price_text
 
 
@@ -11,7 +11,7 @@ async def create_order_details_message(
         await call.answer("Заказ не найден", show_alert=True)
         return
 
-    if order.delivery_type == "PICKUP" and order.pickup_point:
+    if order.delivery_type == DeliveryType.PICKUP and order.pickup_point:
         delivery_info = (
             f"Пункт самовывоза: {order.pickup_point.name}, {order.pickup_point.address}"
         )
@@ -40,4 +40,4 @@ async def create_order_details_message(
 
     text_lines.append(f"\nИтого: {format_price_text(total)}")
 
-    await call.message.answer("\n".join(text_lines), reply_markup=kb)
+    await call.message.edit_text("\n".join(text_lines), reply_markup=kb)
