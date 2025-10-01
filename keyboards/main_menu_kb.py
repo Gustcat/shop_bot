@@ -6,8 +6,9 @@ from aiogram.types import (
 )
 
 from db import UserRole
-from utils.constants.buttons import MAIN_MENU
-from keyboards.common import CART_BUTTON
+from utils.constants.buttons import MAIN_MENU, ORDERS, CATALOG, CREATE_PRODUCT
+from keyboards.common_buttons import CART_BUTTON
+from utils.constants.callbacks import CATALOG_CD, ORDERS_CD, CREATE_PRODUCT_CD
 
 main_reply_kb = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text=MAIN_MENU)]],
@@ -16,22 +17,20 @@ main_reply_kb = ReplyKeyboardMarkup(
 
 
 def main_menu_kb(user_role: UserRole | None) -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton(text=CATALOG, callback_data=CATALOG_CD)],
+        [InlineKeyboardButton(text=ORDERS, callback_data=ORDERS_CD)],
+    ]
+
     if user_role == UserRole.ADMIN:
-        buttons = [
+        buttons.append(
             [
                 InlineKeyboardButton(
-                    text="➕ Создать товар", callback_data="admin_create_product"
+                    text=CREATE_PRODUCT, callback_data=CREATE_PRODUCT_CD
                 )
             ],
-            [InlineKeyboardButton(text="📦 Все заказы", callback_data="admin_orders")],
-        ]
+        )
     else:
-        buttons = [
-            [CART_BUTTON],
-            [InlineKeyboardButton(text="📦 Мои заказы", callback_data="my_orders")],
-        ]
-    buttons.append(
-        [InlineKeyboardButton(text="🛍 Каталог", callback_data="catalog")],
-    )
+        buttons.append([CART_BUTTON])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)

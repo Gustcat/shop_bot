@@ -36,7 +36,6 @@ async def back_to_main_message(message: Message, user: User | None):
 async def back_to_main_callback(call: CallbackQuery, user: User | None):
     text = MAIN_MENU
     user_role = user.role if user else None
-    print(user_role)
     await update_or_replace_message(
         call.message, text, main_menu_kb(user_role=user_role)
     )

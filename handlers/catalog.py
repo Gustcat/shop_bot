@@ -17,14 +17,16 @@ from keyboards.catalog_kb import (
     CategoryCD,
     ProductCD,
 )
-from config import MEDIA_ROOT
-from utils.formatting import format_price_text
+from utils.config import MEDIA_ROOT
+from utils.common_messages import get_product_text
+from utils.constants.callbacks import CATALOG_CD, VIEW_ACTION
+from utils.constants.message_text import NO_CATEGORIES_TEXT, PRODUCT_NOT_FOUND_TEXT
 from utils.messaging import safe_delete_message, update_or_replace_message
 
 router = Router()
 
 
-@router.callback_query(F.data == "catalog")
+@router.callback_query(F.data == CATALOG_CD)
 async def show_categories(call: CallbackQuery):
     """
     Выводит список категорий.
@@ -34,7 +36,7 @@ async def show_categories(call: CallbackQuery):
         categories = result.scalars().all()
 
     if not categories:
-        await call.answer("Категории пока не добавлены.")
+        await call.answer(NO_CATEGORIES_TEXT, show_alert=False)
         return
 
     if call.message.photo:
@@ -89,7 +91,7 @@ async def show_products(call: CallbackQuery, callback_data: CategoryCD):
         await call.answer()
 
 
-@router.callback_query(ProductCD.filter(F.action == "view"))
+@router.callback_query(ProductCD.filter(F.action == VIEW_ACTION))
 async def show_detail_product(
     call: CallbackQuery, callback_data: ProductCD, user: User | None
 ):
@@ -103,14 +105,8 @@ async def show_detail_product(
 
         product = await session.get(Product, product_id)
         if not product:
-            await call.answer("Такого товара нет.", show_alert=True)
+            await call.answer(PRODUCT_NOT_FOUND_TEXT, show_alert=True)
             return
-
-        text = (
-            f"<b>{product.name}</b>\n\n"
-            f"{product.description or 'Без описания'}\n\n"
-            f"Цена: {format_price_text(product.price)}"
-        )
 
         quantity = 0
         if user and user.role == UserRole.CUSTOMER:
@@ -129,7 +125,7 @@ async def show_detail_product(
             await safe_delete_message(call.message)
             await call.message.answer_photo(
                 photo=photo_file,
-                caption=text,
+                caption=get_product_text(product),
                 reply_markup=product_detail_kb(
                     product.id, category_id, user.role, quantity
                 ),
@@ -137,7 +133,7 @@ async def show_detail_product(
             )
         else:
             await call.message.edit_text(
-                text,
+                get_product_text(product),
                 reply_markup=product_detail_kb(
                     product.id, category_id, user.role, quantity
                 ),

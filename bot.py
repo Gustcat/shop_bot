@@ -8,9 +8,9 @@ import asyncio
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-from config import TELEGRAM_TOKEN
+from utils.config import TELEGRAM_TOKEN
 from handlers import main_menu, catalog, cart, order, admin
-from middlewares import UserMiddleware
+from middlewares.user_middleware import UserMiddleware
 from utils.log_config import LOGGING_CONFIG
 
 

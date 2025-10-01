@@ -7,7 +7,7 @@ from sqlalchemy import String, ForeignKey, func, UUID, DateTime
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-from config import DATABASE_URL
+from utils.config import DATABASE_URL
 
 engine = create_async_engine(DATABASE_URL, future=True, echo=True)
 

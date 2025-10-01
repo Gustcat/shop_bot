@@ -3,7 +3,9 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from db import Category, Product, UserRole
 from keyboards.cart_kb import CartCD
-from keyboards.common import MAIN_MENU_BUTTON, CART_BUTTON
+from keyboards.common_buttons import MAIN_MENU_BUTTON, CART_BUTTON
+from utils.constants.buttons import BACK, EDIT, DELETE
+from utils.constants.callbacks import VIEW_ACTION, EDIT_ACTION, DELETE_ACTION
 
 
 class CategoryCD(CallbackData, prefix="category"):
@@ -42,18 +44,13 @@ def products_kb(products: list[Product], category_id: int) -> InlineKeyboardMark
                 InlineKeyboardButton(
                     text=prod.name,
                     callback_data=ProductCD(
-                        action="view", id=prod.id, category_id=category_id
+                        action=VIEW_ACTION, id=prod.id, category_id=category_id
                     ).pack(),
                 )
             ]
         )
 
-    keyboard_rows.append(
-        [
-            InlineKeyboardButton(text="⬅️ Категории", callback_data="catalog"),
-            MAIN_MENU_BUTTON,
-        ]
-    )
+    keyboard_rows.append([MAIN_MENU_BUTTON])
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
 
@@ -68,21 +65,17 @@ def product_detail_kb(
         buttons.append(
             [
                 InlineKeyboardButton(
-                    text="✏️ Редактировать",
+                    text=EDIT,
                     callback_data=ProductCD(
-                        action="edit", id=product_id, category_id=category_id
+                        action=EDIT_ACTION, id=product_id, category_id=category_id
                     ).pack(),
-                )
-            ]
-        )
-        buttons.append(
-            [
+                ),
                 InlineKeyboardButton(
-                    text="🗑 Удалить",
+                    text=DELETE,
                     callback_data=ProductCD(
-                        action="delete", id=product_id, category_id=category_id
+                        action=DELETE_ACTION, id=product_id, category_id=category_id
                     ).pack(),
-                )
+                ),
             ]
         )
     else:
@@ -101,7 +94,7 @@ def product_detail_kb(
     buttons.append(
         [
             InlineKeyboardButton(
-                text="⬅️ Назад", callback_data=CategoryCD(id=category_id).pack()
+                text=BACK, callback_data=CategoryCD(id=category_id).pack()
             ),
             MAIN_MENU_BUTTON,
         ]

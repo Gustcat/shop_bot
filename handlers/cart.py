@@ -3,15 +3,21 @@ from aiogram.types import CallbackQuery
 from sqlalchemy import delete, select
 from sqlalchemy.orm import joinedload
 
-from handlers.catalog import show_detail_product
 from handlers.main_menu import back_to_main_callback
-from keyboards.catalog_kb import ProductCD
+from keyboards.catalog_kb import product_detail_kb
 from utils.constants.buttons import CART
 from db import async_session, CartItem, Product, User
 from keyboards.cart_kb import CartCD, cart_kb
 from repository.user import create_user
-from utils.constants.callbacks import CART_CD
-from utils.formatting import format_price_text
+from utils.constants.callbacks import (
+    CART_CD,
+    IGNORE_CD,
+    DELETE_ACTION,
+    DECREASE_ACTION,
+    INCREASE_ACTION,
+)
+from utils.constants.message_text import CART_EMPTY_TEXT
+from utils.formatting import format_price_in_text
 from utils.messaging import update_or_replace_message
 
 router = Router()
@@ -42,8 +48,9 @@ async def add_to_cart(call: CallbackQuery, callback_data: CartCD, user: User | N
             session.add(cart_item)
 
         await session.commit()
-    product_cd = ProductCD(action="view", id=product_id, category_id=category_id)
-    await show_detail_product(call, product_cd, user)
+    kb = product_detail_kb(product_id, category_id, user.role, cart_item.quantity)
+    await call.message.edit_reply_markup(reply_markup=kb)
+    await call.answer()
 
 
 @router.callback_query(F.data == CART_CD)
@@ -60,7 +67,7 @@ async def show_cart(call: CallbackQuery, user: User | None):
         cart_items = result.scalars().all()
 
         if not cart_items:
-            await call.answer(f"{CART} пуста.", show_alert=False)
+            await call.answer(CART_EMPTY_TEXT, show_alert=False)
             await back_to_main_callback(call, user)
             return
 
@@ -74,10 +81,10 @@ async def show_cart(call: CallbackQuery, user: User | None):
             cost = product.price * item.quantity
             total += cost
             text_lines.append(
-                f"{product.name} — {item.quantity} шт. × {format_price_text(product.price)} = {format_price_text(cost)}"
+                f"{product.name} — {item.quantity} шт. × {format_price_in_text(product.price)} = {format_price_in_text(cost)}"
             )
 
-        text_lines.append(f"\n💰 Итого: {format_price_text(total)}")
+        text_lines.append(f"\n💰 Итого: {format_price_in_text(total)}")
 
     await update_or_replace_message(
         message=call.message,
@@ -87,7 +94,7 @@ async def show_cart(call: CallbackQuery, user: User | None):
     await call.answer()
 
 
-@router.callback_query(CartCD.filter(F.action == "increase"))
+@router.callback_query(CartCD.filter(F.action == INCREASE_ACTION))
 async def increase_quantity(
     call: CallbackQuery, callback_data: CartCD, user: User | None
 ):
@@ -111,7 +118,7 @@ async def increase_quantity(
     await show_cart(call, user)
 
 
-@router.callback_query(CartCD.filter(F.action == "decrease"))
+@router.callback_query(CartCD.filter(F.action == DECREASE_ACTION))
 async def decrease_quantity(
     call: CallbackQuery, callback_data: CartCD, user: User | None
 ):
@@ -138,7 +145,7 @@ async def decrease_quantity(
     await show_cart(call, user)
 
 
-@router.callback_query(CartCD.filter(F.action == "remove"))
+@router.callback_query(CartCD.filter(F.action == DELETE_ACTION))
 async def remove_item(call: CallbackQuery, callback_data: CartCD, user: User | None):
     """
     Удаляет товар из корзины
@@ -158,6 +165,6 @@ async def remove_item(call: CallbackQuery, callback_data: CartCD, user: User | N
     await show_cart(call, user)
 
 
-@router.callback_query(F.data == "ignore")
+@router.callback_query(F.data == IGNORE_CD)
 async def ignore_button(call: CallbackQuery):
     await call.answer()

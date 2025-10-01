@@ -1,16 +1,9 @@
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup
-
-from db import Order, DeliveryType
-from utils.formatting import format_price_text
+from db import Order, DeliveryType, Product
+from utils.formatting import format_price_in_text
 
 
-async def create_order_details_message(
-    call: CallbackQuery, order: Order | None, kb: InlineKeyboardMarkup | None = None
-):
-    if not order:
-        await call.answer("Заказ не найден", show_alert=True)
-        return
-
+async def get_order_details_text(order: Order) -> str:
+    """Генерация текста с деталями заказа."""
     if order.delivery_type == DeliveryType.PICKUP and order.pickup_point:
         delivery_info = (
             f"Пункт самовывоза: {order.pickup_point.name}, {order.pickup_point.address}"
@@ -19,7 +12,7 @@ async def create_order_details_message(
         delivery_info = f"Адрес: {order.address or '—'}"
 
     text_lines = [
-        f"🧾 Заказ {order.order_uuid}",
+        f"<b>🧾 Заказ {order.order_uuid}</b>",
         f"Статус: {order.status}",
         f"Имя: {order.name}",
         f"Телефон: {order.phone}",
@@ -35,9 +28,17 @@ async def create_order_details_message(
         line_total = price * item.quantity
         total += line_total
         text_lines.append(
-            f"{item.product_name} — {item.quantity} × {format_price_text(price)} = {format_price_text(line_total)}"
+            f"{item.product_name} — {item.quantity} × {format_price_in_text(price)} = {format_price_in_text(line_total)}"
         )
 
-    text_lines.append(f"\nИтого: {format_price_text(total)}")
+    text_lines.append(f"\nИтого: {format_price_in_text(total)}")
+    return "\n".join(text_lines)
 
-    await call.message.edit_text("\n".join(text_lines), reply_markup=kb)
+
+def get_product_text(product: Product) -> str:
+    """Генерация текста карточки товара."""
+    return (
+        f"<b>{product.name}</b>\n\n"
+        f"{product.description or 'Без описания'}\n\n"
+        f"Цена: {format_price_in_text(product.price)}"
+    )

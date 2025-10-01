@@ -1,23 +1,56 @@
 from aiofiles import os
 from aiogram import Router, F, Bot
+from aiogram.enums import ParseMode
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from config import MEDIA_ROOT
+from utils.config import MEDIA_ROOT
 from db import async_session, Order, Product, Category, OrderItem, UserRole, User
 from keyboards.admin_kb import (
     AdminCD,
     admin_change_status_kb,
     confirm_product_kb,
-    orders_kb,
 )
 from keyboards.catalog_kb import ProductCD
 from keyboards.main_menu_kb import main_menu_kb
-from utils.common_messages import create_order_details_message
-from utils.messaging import safe_delete_message
+from repository.category import get_or_create_category
+from utils.constants.buttons import MAIN_MENU
+from utils.constants.callbacks import (
+    CREATE_PRODUCT_CD,
+    VIEW_ACTION,
+    EDIT_ACTION,
+    DELETE_ACTION,
+    PRODUCT_CONFIRM_CD,
+    PRODUCT_CANCEL_CD,
+    SET_STATUS_ACTION,
+)
+from utils.constants.message_text import (
+    INPUT_PRICE_TEXT,
+    OPTIONAL_FIELD_TEXT,
+    PRICE_ATTENTION_TEXT,
+    INPUT_DESCRIPTION_TEXT,
+    PRODUCT_NAME_ATTENTION_TEXT,
+    INPUT_PRODUCT_NAME_TEXT,
+    PRODUCT_NOT_FOUND_TEXT,
+    INPUT_PHOTO_TEXT,
+    PHOTO_ATTENTION_TEXT,
+    INPUT_CATEGORY_TEXT,
+    CATEGORY_ATTENTION_TEXT,
+    NO_CATEGORIES_TEXT,
+    INPUT_NEW_CATEGORY_TEXT,
+    PRODUCT_DELETED_TEXT,
+    CANCEL_UPDATE_PRODUCT_TEXT,
+    CANCEL_CREATE_PRODUCT_TEXT,
+)
+from utils.formatting import format_text_in_price
+from utils.messaging import (
+    safe_delete_message,
+    create_non_admin_forbidden_message,
+    create_order_details_message,
+)
 
 router = Router()
 
@@ -42,38 +75,19 @@ async def file_remove(filename):
             pass
 
 
-@router.callback_query(F.data == "admin_create_product")
+@router.callback_query(F.data == CREATE_PRODUCT_CD)
 async def start_create_product(
     call: CallbackQuery, state: FSMContext, user: User | None
 ):
     if user and user.role != UserRole.ADMIN:
-        return await call.answer("Нет доступа ❌", show_alert=True)
-    await call.message.answer("✏️ Введите название товара:")
+        await create_non_admin_forbidden_message(call)
+        return
+    await call.message.answer(INPUT_PRODUCT_NAME_TEXT + ":")
+    await call.answer()
     await state.set_state(ProductFSM.name)
 
 
-@router.callback_query(ProductCD.filter(F.action == "delete"))
-async def delete_product(
-    call: CallbackQuery, callback_data: ProductCD, user: User | None
-):
-    if user and user.role != UserRole.ADMIN:
-        return await call.answer("Нет доступа ❌", show_alert=True)
-    product_id = callback_data.id
-    async with async_session() as session:
-        product = await session.get(Product, product_id)
-        if not product:
-            return await call.answer("❌ Товар не найден", show_alert=True)
-        file = product.photo_filename
-        await session.delete(product)
-        await session.commit()
-        await file_remove(file)
-
-    await call.answer("✅ Товар успешно удалён", show_alert=True)
-    await safe_delete_message(call.message)
-    await call.message.answer("📋 Меню:", reply_markup=main_menu_kb(True))
-
-
-@router.callback_query(ProductCD.filter(F.action == "edit"))
+@router.callback_query(ProductCD.filter(F.action == EDIT_ACTION))
 async def start_edit_product(
     call: CallbackQuery,
     callback_data: ProductCD,
@@ -81,18 +95,18 @@ async def start_edit_product(
     user: User | None,
 ):
     if user and user.role != UserRole.ADMIN:
-        return await call.answer("Нет доступа ❌", show_alert=True)
+        await create_non_admin_forbidden_message(call)
+        return
     product_id = callback_data.id
 
     async with async_session() as session:
         product = await session.get(Product, product_id)
         if not product:
-            return await call.answer("❌ Товар не найден", show_alert=True)
+            return await call.answer(PRODUCT_NOT_FOUND_TEXT, show_alert=True)
 
     await state.update_data(id=product.id)
     await call.message.answer(
-        f"✏️ Редактирование товара: {product.name}\n\n"
-        "Введите новое название или отправьте `-`, чтобы оставить без изменений:"
+        f"✏️ Редактирование товара: {product.name}\n\n" + INPUT_PRODUCT_NAME_TEXT + ":"
     )
     await state.set_state(ProductFSM.name)
 
@@ -100,13 +114,11 @@ async def start_edit_product(
 @router.message(ProductFSM.name)
 async def process_name(message: Message, state: FSMContext):
     data = await state.get_data()
-    if not message.text == "-" and "id" in data:
+    if not message.text.isalpha() and not (message.text == "-" and "id" in data):
+        return await message.answer(PRODUCT_NAME_ATTENTION_TEXT + ":")
+    elif "id" not in data:
         await state.update_data(name=message.text)
-    elif not message.text.isalpha():
-        "⚠️ Введите только буквы для названия товара"
-    await message.answer(
-        "📝 Введите описание товара (или `-`, чтобы оставить без изменений):"
-    )
+    await message.answer(INPUT_DESCRIPTION_TEXT + OPTIONAL_FIELD_TEXT + ":")
     await state.set_state(ProductFSM.description)
 
 
@@ -117,37 +129,32 @@ async def process_description(message: Message, state: FSMContext):
 
     data = await state.get_data()
     if "id" in data:
-        await message.answer(
-            "💰 Введите цену товара (число, в копейках) или `-`, чтобы оставить без изменений:"
-        )
+        await message.answer(INPUT_PRICE_TEXT + OPTIONAL_FIELD_TEXT + ":")
     else:
-        await message.answer("💰 Введите цену товара (число, в копейках):")
+        await message.answer(INPUT_PRICE_TEXT + ":")
     await state.set_state(ProductFSM.price)
 
 
 @router.message(ProductFSM.price)
 async def process_price(message: Message, state: FSMContext):
-    # TODO: convert from rouble to kopeyka
     data = await state.get_data()
     if not message.text == "-" or "id" not in data:
         try:
-            price = int(message.text)
+            price = format_text_in_price(message.text)
             await state.update_data(price=price)
         except ValueError:
-            return await message.answer("⚠️ Введите число для цены")
+            return await message.answer(PRICE_ATTENTION_TEXT + ":")
 
-    await message.answer(
-        "📸 Отправьте фото товара или `-`, чтобы оставить без изменений:"
-    )
+    await message.answer(INPUT_PHOTO_TEXT + OPTIONAL_FIELD_TEXT + ":")
     await state.set_state(ProductFSM.photo)
 
 
 @router.message(ProductFSM.photo, F.text)
-async def process_photo(message: Message, state: FSMContext):
+async def process_photo_text(message: Message, state: FSMContext):
     if message.text == "-":
         pass
     else:
-        return await message.answer("⚠️ Отправьте фото или `-`")
+        return await message.answer(PHOTO_ATTENTION_TEXT + ":")
 
     await show_category(message, state)
 
@@ -162,7 +169,7 @@ async def process_photo(message: Message, state: FSMContext, bot: Bot):
         await bot.download_file(file_info.file_path, file_path)
         await state.update_data(photo=f"{photo.file_id}")
     else:
-        return await message.answer("⚠️ Отправьте фото или `-`")
+        return await message.answer(PHOTO_ATTENTION_TEXT + ":")
 
     await show_category(message, state)
 
@@ -173,9 +180,7 @@ async def show_category(message: Message, state):
         categories = result.scalars().all()
 
     if not categories:
-        await message.answer(
-            "📂 Категории отсутствуют, введите название новой категории:"
-        )
+        await message.answer(NO_CATEGORIES_TEXT + ". " + INPUT_NEW_CATEGORY_TEXT + ":")
         await state.set_state(ProductFSM.category_creation)
 
     header = f"{'ID':<5} {'Имя'}"
@@ -183,17 +188,23 @@ async def show_category(message: Message, state):
     table = "\n".join([header, "-" * 30, *rows])
 
     text = f"<b>📂 Список категорий</b>\n\n<pre>{table}</pre>"
-    await message.answer(text, parse_mode="HTML")
-    await message.answer("📂 Укажите ID категории (число):")
+    await message.answer(text, parse_mode=ParseMode.HTML)
 
+    message = INPUT_CATEGORY_TEXT
+    data = await state.get_data()
+    if "id" in data:
+        message += OPTIONAL_FIELD_TEXT
+
+    await message.answer(message + ":")
     await state.set_state(ProductFSM.category)
 
 
 @router.message(ProductFSM.category)
 async def process_category(message: Message, state: FSMContext):
-    if message.text.isdigit():
+    cat_name_or_id = message.text.strip()
+    if cat_name_or_id.isdigit():
         try:
-            category_id = int(message.text)
+            category_id = int(cat_name_or_id)
             async with async_session() as session:
                 result = await session.execute(
                     select(Category).where(Category.id == category_id)
@@ -205,16 +216,16 @@ async def process_category(message: Message, state: FSMContext):
             await state.update_data(category=category.id)
         except ValueError:
             return await message.answer(
-                "⚠️ Введите ID (число) категории. Для создания новой категории введите её название."
+                CATEGORY_ATTENTION_TEXT + INPUT_NEW_CATEGORY_TEXT + ":"
             )
-    elif message.text != "-":
-        await get_or_create_category(message, state)
+    elif cat_name_or_id != "-":
+        async with async_session() as session:
+            category = await get_or_create_category(session, cat_name_or_id)
+            await state.update_data(category=category.id)
     else:
         data = await state.get_data()
         if "id" not in data:
-            return await message.answer(
-                "️⚠️ У товара нет категории! Введите название категории"
-            )
+            return await message.answer(CATEGORY_ATTENTION_TEXT)
 
     await send_product_summary(message, state)
     await state.set_state(ProductFSM.confirm)
@@ -222,28 +233,16 @@ async def process_category(message: Message, state: FSMContext):
 
 @router.message(ProductFSM.category_creation)
 async def process_category_creation(message: Message, state: FSMContext):
-    if message.text == "-" or message.text.isdigit():
-        return await message.answer("️⚠️ Введите название категории")
+    cat_name = message.text.strip()
+    if cat_name == "-" or cat_name.isdigit():
+        return await message.answer(INPUT_NEW_CATEGORY_TEXT)
     else:
-        await get_or_create_category(message, state)
+        async with async_session() as session:
+            category = await get_or_create_category(session, cat_name)
+            await state.update_data(category=category.id)
 
     await send_product_summary(message, state)
     await state.set_state(ProductFSM.confirm)
-
-
-async def get_or_create_category(message: Message, state):
-    async with async_session() as session:
-        result = await session.execute(
-            select(Category).where(Category.name == message.text.strip())
-        )
-        category = result.scalar_one_or_none()
-
-        if not category:
-            category = Category(name=message.text)
-            session.add(category)
-            await session.commit()
-            await session.refresh(category)
-    await state.update_data(category=category.id)
 
 
 async def send_product_summary(message: Message, state):
@@ -278,9 +277,11 @@ async def send_product_summary(message: Message, state):
         await message.answer(summary, reply_markup=confirm_product_kb)
 
 
-@router.callback_query(F.data == "product_confirm", ProductFSM.confirm)
-async def confirm_product(call: CallbackQuery, state: FSMContext):
+@router.callback_query(F.data == PRODUCT_CONFIRM_CD, ProductFSM.confirm)
+async def confirm_product(call: CallbackQuery, state: FSMContext, user: User | None):
+    """Сохраняет созданный или отредактированный товар в базе."""
     data = await state.get_data()
+    user_role = user.role if user else None
 
     async with async_session() as session:
         if "id" in data:
@@ -304,41 +305,59 @@ async def confirm_product(call: CallbackQuery, state: FSMContext):
 
     await call.answer("✅ Товар сохранён")
     await state.clear()
-    await call.message.edit_reply_markup(reply_markup=main_menu_kb(True))
+    await call.message.edit_reply_markup(reply_markup=main_menu_kb(user_role))
 
 
-@router.callback_query(F.data == "product_cancel", ProductFSM.confirm)
-async def cancel_product(call: CallbackQuery, state: FSMContext):
+@router.callback_query(F.data == PRODUCT_CANCEL_CD, ProductFSM.confirm)
+async def cancel_product(call: CallbackQuery, state: FSMContext, user: User | None):
+    """Отмена создания/редактирования товара."""
+    user_role = user.role if user else None
     data = await state.get_data()
     photo = data.get("photo")
     await file_remove(photo)
-
+    if "id" in data:
+        text = CANCEL_UPDATE_PRODUCT_TEXT
+    else:
+        text = CANCEL_CREATE_PRODUCT_TEXT
     await state.clear()
-    await call.message.answer("Изменения отменены.", show_alert=True)
-    await call.message.answer("📋 Меню:", reply_markup=main_menu_kb(True))
+    await call.message.answer(text, show_alert=True)
+    await call.message.answer(MAIN_MENU, reply_markup=main_menu_kb(user_role))
 
 
-@router.callback_query(F.data == "admin_orders")
-async def show_orders(call: CallbackQuery, user: User | None):
+@router.callback_query(ProductCD.filter(F.action == DELETE_ACTION))
+async def delete_product(
+    call: CallbackQuery, callback_data: ProductCD, user: User | None
+):
+    """Удаляет товар из базы."""
+    user_role = user.role if user else None
     if user and user.role != UserRole.ADMIN:
-        return await call.answer("Нет доступа ❌", show_alert=True)
-    async with async_session() as session:
-        res = await session.execute(select(Order).order_by(Order.created_at))
-        orders = res.scalars().all()
-
-    if not orders:
-        await call.answer("Заказы пока не добавлены.")
+        await create_non_admin_forbidden_message(call)
         return
 
-    await call.message.edit_text("Заказы:", reply_markup=orders_kb(orders))
+    product_id = callback_data.id
+    async with async_session() as session:
+        product = await session.get(Product, product_id)
+        if not product:
+            return await call.answer(PRODUCT_NOT_FOUND_TEXT, show_alert=True)
+        file = product.photo_filename
+        await session.delete(product)
+        await session.commit()
+        await file_remove(file)
+
+    await call.answer(PRODUCT_DELETED_TEXT, show_alert=False)
+    await safe_delete_message(call.message)
+    await call.message.answer(MAIN_MENU, reply_markup=main_menu_kb(user_role))
+    await call.answer()
 
 
 @router.callback_query(AdminCD.filter())
 async def admin_change_status(
     call: CallbackQuery, callback_data: AdminCD, user: User | None
 ):
+    """Позволяет администратору просматривать и изменять заказы."""
     if user and user.role != UserRole.ADMIN:
-        return await call.answer("Нет доступа ❌", show_alert=True)
+        await create_non_admin_forbidden_message(call)
+        return
 
     async with async_session() as session:
         result = await session.execute(
@@ -351,15 +370,23 @@ async def admin_change_status(
         )
         order = result.scalar_one_or_none()
 
-        if callback_data.action == "view":
+        action = callback_data.action
+
+        if action == VIEW_ACTION:
             await create_order_details_message(
-                call, order, admin_change_status_kb(callback_data.order_id)
+                call, order, admin_change_status_kb(order.id)
             )
             return
 
-        if callback_data.action == "set_status":
-            order.status = callback_data.order_status
-            await session.commit()
-            await call.answer(f"Статус изменён на {order.status} ✅", show_alert=True)
-            await safe_delete_message(call.message)
-            await create_order_details_message(call, order, main_menu_kb(user.role))
+        if action == SET_STATUS_ACTION:
+            new_status = callback_data.order_status
+            if order.status != new_status:
+                order.status = new_status
+                await session.commit()
+                await call.answer(
+                    f"Статус изменён на {order.status} ✅", show_alert=False
+                )
+                await create_order_details_message(
+                    call, order, admin_change_status_kb(order.id)
+                )
+            await call.answer()

@@ -1,45 +1,30 @@
 from aiogram.filters.callback_data import CallbackData
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from db import OrderStatus, Order
-from keyboards.common import MAIN_MENU_BUTTON
+from db import OrderStatus
+from keyboards.common_buttons import MAIN_MENU_BUTTON, BACK_TO_LIST_ORDERS_BUTTON
+from utils.constants.buttons import CONFIRM, CANCEL
+from utils.constants.callbacks import (
+    PRODUCT_CONFIRM_CD,
+    PRODUCT_CANCEL_CD,
+    SET_STATUS_ACTION,
+)
 
 
 class AdminCD(CallbackData, prefix="admin"):
     order_id: int
     action: str
-    order_status: OrderStatus
+    order_status: OrderStatus | None = None
 
 
 confirm_product_kb = InlineKeyboardMarkup(
     inline_keyboard=[
         [
-            InlineKeyboardButton(
-                text="✅ Подтвердить", callback_data="product_confirm"
-            ),
-            InlineKeyboardButton(text="❌ Отменить", callback_data="product_cancel"),
+            InlineKeyboardButton(text=CONFIRM, callback_data=PRODUCT_CONFIRM_CD),
+            InlineKeyboardButton(text=CANCEL, callback_data=PRODUCT_CANCEL_CD),
         ]
     ]
 )
-
-
-def orders_kb(orders: list[Order]) -> InlineKeyboardMarkup:
-    """Клавиатура со списком всех заказов"""
-    rows = [
-        [
-            InlineKeyboardButton(
-                text=str(order.order_uuid),
-                callback_data=AdminCD(
-                    order_id=order.id, order_status=order.status, action="view"
-                ).pack(),
-            )
-        ]
-        for order in orders
-    ]
-
-    rows.append([MAIN_MENU_BUTTON])
-
-    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def admin_change_status_kb(order_id: int) -> InlineKeyboardMarkup:
@@ -49,16 +34,23 @@ def admin_change_status_kb(order_id: int) -> InlineKeyboardMarkup:
         ("🚚 Доставлен", OrderStatus.COMPLETED),
     ]
 
-    keyboard = [
+    buttons = [
         [
             InlineKeyboardButton(
                 text=text,
                 callback_data=AdminCD(
-                    order_id=order_id, action="set_status", order_status=status
+                    order_id=order_id, action=SET_STATUS_ACTION, order_status=status
                 ).pack(),
             )
         ]
         for text, status in statuses
     ]
 
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+    buttons.append(
+        [
+            BACK_TO_LIST_ORDERS_BUTTON,
+            MAIN_MENU_BUTTON,
+        ]
+    )
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)

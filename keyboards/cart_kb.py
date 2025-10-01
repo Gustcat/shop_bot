@@ -2,8 +2,16 @@ from aiogram.filters.callback_data import CallbackData
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from db import CartItem
-from keyboards.common import MAIN_MENU_BUTTON
-from utils.constants.callbacks import CART_CD
+from keyboards.common_buttons import MAIN_MENU_BUTTON
+from utils.constants.buttons import DELETE, DECREASE, INCREASE, PLACE_ORDER
+from utils.constants.callbacks import (
+    CART_CD,
+    IGNORE_CD,
+    PLACE_ORDER_CD,
+    DELETE_ACTION,
+    DECREASE_ACTION,
+    INCREASE_ACTION,
+)
 
 
 class CartCD(CallbackData, prefix=CART_CD):
@@ -20,36 +28,34 @@ def cart_kb(cart_items: list[CartItem]) -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(
                     text=f"{item.product.name} \n {item.quantity} шт.",
-                    callback_data="ignore",
+                    callback_data=IGNORE_CD,
                 )
             ]
         )
         kb.append(
             [
                 InlineKeyboardButton(
-                    text="➖",
+                    text=DECREASE,
                     callback_data=CartCD(
-                        action="decrease", product_id=item.product_id
+                        action=DECREASE_ACTION, product_id=item.product_id
                     ).pack(),
                 ),
                 InlineKeyboardButton(
-                    text="➕",
+                    text=INCREASE,
                     callback_data=CartCD(
-                        action="increase", product_id=item.product_id
+                        action=INCREASE_ACTION, product_id=item.product_id
                     ).pack(),
                 ),
                 InlineKeyboardButton(
-                    text="❌ Удалить",
+                    text=DELETE,
                     callback_data=CartCD(
-                        action="remove", product_id=item.product_id
+                        action=DELETE_ACTION, product_id=item.product_id
                     ).pack(),
                 ),
             ]
         )
 
-    kb.append(
-        [InlineKeyboardButton(text="✅ Оформить заказ", callback_data="checkout")]
-    )
+    kb.append([InlineKeyboardButton(text=PLACE_ORDER, callback_data=PLACE_ORDER_CD)])
     kb.append([MAIN_MENU_BUTTON])
 
     return InlineKeyboardMarkup(inline_keyboard=kb)
